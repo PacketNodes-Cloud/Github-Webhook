@@ -1,87 +1,76 @@
 from flask import Flask, request, jsonify
-import json
-import logging
-import requests
 import os
+import requests
+import logging
 
 app = Flask(__name__)
 
-# Fetch Discord Webhook URL from environment variable
 DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
-
 if not DISCORD_WEBHOOK_URL:
     raise ValueError("Missing DISCORD_WEBHOOK_URL! Set it in Render environment variables.")
 
-# Configure logging
 logging.basicConfig(filename="webhook.log", level=logging.INFO, format="%(asctime)s - %(message)s")
 
-def send_to_discord(embed):
-    """Send formatted GitHub event as an embed to Discord."""
-    data = {"embeds": [embed]}
-    headers = {"Content-Type": "application/json"}
+EVENT_COLORS = {
+    "push": 0x57F287,
+    "pull_request": 0xFAA61A,
+    "issues": 0xED4245,
+    "star": 0xFEE75C,
+    "default": 0x5865F2,
+}
+
+def send_to_discord(title, description, color="default"):
+    embed = {
+        "title": title,
+        "description": description,
+        "color": EVENT_COLORS.get(color, EVENT_COLORS["default"]),
+        "footer": {"text": "GitHub → Discord Webhook"},
+    }
+    response = requests.post(DISCORD_WEBHOOK_URL, json={"embeds": [embed]}, headers={"Content-Type": "application/json"})
     
-    response = requests.post(DISCORD_WEBHOOK_URL, json=data, headers=headers)
-    
-    if response.status_code == 204:
-        logging.info("Sent to Discord successfully!")
-    else:
+    if response.status_code != 204:
         logging.error(f"Failed to send to Discord: {response.text}")
 
 @app.route("/webhook", methods=["POST"])
 def github_webhook():
-    """Handle GitHub webhook events and send to Discord."""
-    payload = request.json  # Get GitHub event data
-    event = request.headers.get("X-GitHub-Event", "ping")  # Event type
+    payload = request.json
+    event = request.headers.get("X-GitHub-Event", "ping")
 
-    logging.info(f"Received event: {event}")
-    logging.info(json.dumps(payload, indent=4))  # Log full event
+    logging.info(f"Received GitHub Event: {event}")
 
-    embed = {
-        "title": f"GitHub Event: {event}",
-        "color": 0x00ff00,  # Green color
-        "fields": [],
-        "footer": {"text": "GitHub → Discord Webhook"}
-    }
+    repo = payload.get("repository", {}).get("full_name", "Unknown Repository")
 
-    # Handle different GitHub events
     if event == "push":
-        repo = payload["repository"]["full_name"]
-        pusher = payload["pusher"]["name"]
-        commit_count = len(payload["commits"])
-        commit_messages = "\n".join([f"- {c['message']}" for c in payload["commits"]])
-
-        embed["title"] = f"Push Event - {repo}"
-        embed["description"] = f"**{pusher}** pushed {commit_count} commits."
-        embed["fields"].append({"name": "Commits", "value": commit_messages[:1024], "inline": False})
+        pusher = payload.get("pusher", {}).get("name", "Unknown User")
+        commits = payload.get("commits", [])
+        commit_count = len(commits)
+        commit_messages = "\n".join([f"• `{c['message']}`" for c in commits]) or "No commit messages."
+        send_to_discord(f"📌 Push Event - {repo}", f"**{pusher}** pushed {commit_count} commits:\n{commit_messages}", "push")
 
     elif event == "pull_request":
-        action = payload["action"]
-        pr = payload["pull_request"]
-        repo = payload["repository"]["full_name"]
-        user = pr["user"]["login"]
-        title = pr["title"]
-        url = pr["html_url"]
-
-        embed["title"] = f"Pull Request {action.capitalize()} - {repo}"
-        embed["description"] = f"**{user}** {action} a pull request: [{title}]({url})"
+        pr = payload.get("pull_request", {})
+        user = pr.get("user", {}).get("login", "Unknown User")
+        title = pr.get("title", "Untitled PR")
+        url = pr.get("html_url", "#")
+        action = payload.get("action", "updated")
+        send_to_discord(f"🔄 Pull Request {action.capitalize()} - {repo}", f"**[{title}]({url})** by **{user}**", "pull_request")
 
     elif event == "issues":
-        action = payload["action"]
-        issue = payload["issue"]
-        repo = payload["repository"]["full_name"]
-        user = issue["user"]["login"]
-        title = issue["title"]
-        url = issue["html_url"]
+        issue = payload.get("issue", {})
+        user = issue.get("user", {}).get("login", "Unknown User")
+        title = issue.get("title", "Untitled Issue")
+        url = issue.get("html_url", "#")
+        action = payload.get("action", "updated")
+        send_to_discord(f"🐛 Issue {action.capitalize()} - {repo}", f"**[{title}]({url})** reported by **{user}**", "issues")
 
-        embed["title"] = f"Issue {action.capitalize()} - {repo}"
-        embed["description"] = f"**{user}** {action} an issue: [{title}]({url})"
+    elif event == "star":
+        user = payload.get("sender", {}).get("login", "Unknown User")
+        send_to_discord(f"⭐ Star Event - {repo}", f"**{user}** starred `{repo}`", "star")
 
     else:
-        embed["description"] = f"Received `{event}` event from GitHub."
+        send_to_discord(f"📡 GitHub Event: {event.capitalize()}", "This event type is currently not customized.", "default")
 
-    send_to_discord(embed)
     return jsonify({"message": "Webhook received!", "event": event}), 200
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port, debug=True)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=True)
