@@ -24,7 +24,6 @@ def send_to_discord(title, description, color="default"):
         "title": title,
         "description": description,
         "color": EVENT_COLORS.get(color, EVENT_COLORS["default"]),
-        "footer": {"text": "Frosty"},
     }
     response = requests.post(DISCORD_WEBHOOK_URL, json={"embeds": [embed]}, headers={"Content-Type": "application/json"})
     
