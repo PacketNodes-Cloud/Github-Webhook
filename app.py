@@ -6,8 +6,11 @@ import os
 
 app = Flask(__name__)
 
-# Discord Webhook URL (Set your actual webhook URL here)
-DISCORD_WEBHOOK_URL = "YOUR_DISCORD_WEBHOOK_URL"
+# Fetch Discord Webhook URL from environment variable
+DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
+
+if not DISCORD_WEBHOOK_URL:
+    raise ValueError("Missing DISCORD_WEBHOOK_URL! Set it in Render environment variables.")
 
 # Configure logging
 logging.basicConfig(filename="webhook.log", level=logging.INFO, format="%(asctime)s - %(message)s")
